@@ -35,13 +35,19 @@ allfeat_lst = ["SAO2", "FIO2", "ECGRATE", "ETCO2", "RESPRATE", "PEEP", "TV", "PE
 top15 = ['ECGRATE', 'ETCO2', 'ETSEV', 'ETSEVO', 'FIO2', 'NIBPD', 'NIBPM',
          'NIBPS', 'PEAK', 'PEEP', 'PIP', 'RESPRATE', 'SAO2', 'TEMP1', 'TV']
 
-def get_subset_inds(DPATH, subset_fileinds):
-    trval_files = np.load("{}raw/train_validation_fileinds.npy".format(DPATH))
-    X_inds = np.isin(trval_files, subset_fileinds)
-    return(X_inds)
-
-def load_raw_data(DPATH,data_type,dt,X_ema,non_signal_inds,curr_feat,is_single_feat,
-                  subset_fileinds=None,rpath="raw",stack_feat=True,feat_lst=None):
+def load_raw_data(DPATH,
+                  data_type,
+                  dt,
+                  X_ema,
+                  non_signal_inds,
+                  curr_feat,
+                  is_single_feat,
+                  rpath="raw",
+                  stack_feat=True,
+                  feat_lst=None):
+    """
+    Load raw data
+    """
     
     if DEBUG:
         print("[DEBUG] Starting load_raw_data")
@@ -55,13 +61,10 @@ def load_raw_data(DPATH,data_type,dt,X_ema,non_signal_inds,curr_feat,is_single_f
     
     if feat_lst is None: feat_lst = top15
     
-    if not subset_fileinds is None: X_inds = get_subset_inds(DPATH, subset_fileinds)
-
     if is_single_feat:
         f = [f for f in X_files if curr_feat in f][0]
         if DEBUG: print("[DEBUG] Loading raw file: {}".format("{}{}/{}".format(DPATH,rpath,f)))
         X_curr = np.load("{}{}/{}".format(DPATH,rpath,f), mmap_mode="r")
-        if not subset_fileinds is None: X_curr = X_curr[X_inds,:]
         X = X_curr
         assert(X.shape[1] == 60)
     else:
@@ -73,14 +76,11 @@ def load_raw_data(DPATH,data_type,dt,X_ema,non_signal_inds,curr_feat,is_single_f
             if feat in feat_lst: # Check to make sure it's in the top 15
                 if DEBUG: print("[DEBUG] Loading: {}{}/{}".format(DPATH,rpath,f))
                 X_curr = np.load("{}{}/{}".format(DPATH,rpath,f), mmap_mode="r")
-                if not subset_fileinds is None: X_curr = X_curr[X_inds,:]
                 X_lst.append(X_curr)
 
         # add the nonsignal stuff
         if "nonsignal" in data_type:
             X_ema_curr = X_ema[:,non_signal_inds]
-            if not subset_fileinds is None:
-                X_ema_curr = X_ema_curr[X_inds]
             X_lst.append(X_ema_curr)
 
         # Concatenate
@@ -94,13 +94,20 @@ def load_raw_data(DPATH,data_type,dt,X_ema,non_signal_inds,curr_feat,is_single_f
             X = X_lst
     return(X)
 
-def load_ema_data(DPATH,data_type,dt,X_ema,non_signal_inds,feat_lst_inds,curr_feat,curr_feat_inds_ema,
-                  is_single_feat,subset_fileinds):
+def load_ema_data(DPATH,
+                  data_type,
+                  dt,
+                  X_ema,
+                  non_signal_inds,
+                  feat_lst_inds,
+                  curr_feat,
+                  curr_feat_inds_ema,
+                  is_single_feat):
+    """
+    Code to load EMA data
+    """
     if is_single_feat:
         X = X_ema[:,curr_feat_inds_ema]
-        if not subset_fileinds is None: 
-            X_inds = get_subset_inds(DPATH, subset_fileinds)
-            X = X[X_inds]
         assert(X.shape[1] == len(curr_feat_inds_ema))
     else:
         # Get the appropriate indices for the ema stuff
@@ -109,9 +116,6 @@ def load_ema_data(DPATH,data_type,dt,X_ema,non_signal_inds,feat_lst_inds,curr_fe
             curr_inds = list(set(non_signal_inds) | set(feat_lst_inds))
             
         X = X_ema[:,curr_inds]
-        if not subset_fileinds is None: 
-            X_inds = get_subset_inds(DPATH, subset_fileinds)
-            X = X[X_inds]
         if "nonsignal" in data_type:
             assert(X.shape[1] == len(feat_lst_inds) + len(non_signal_inds))
         else:
@@ -144,10 +148,20 @@ def list_files(DPATH,data_type,is_train):
         hfiles = [f for f in files if "test" in f]
     return(HIDPATH,hfiles,hosp_model)
 
-def load_hid_data(DPATH,data_type,dt,X_ema,non_signal_inds,is_train,
-                  curr_feat,hosp_data,is_single_feat,subset_fileinds=None,
-                  shrink_path=None,feat_lst=None):
-    if not subset_fileinds is None: X_inds = get_subset_inds(DPATH, subset_fileinds)
+def load_hid_data(DPATH,
+                  data_type,
+                  dt,
+                  X_ema,
+                  non_signal_inds,
+                  is_train,
+                  curr_feat,
+                  hosp_data,
+                  is_single_feat,
+                  shrink_path=None,
+                  feat_lst=None):
+    """
+    Load embedded (hidden) data
+    """
     if not shrink_path is None: DPATH = shrink_path
     if feat_lst is None: feat_lst = top15
     HIDPATH,hfiles,hosp_model = list_files(DPATH,data_type,is_train)
@@ -175,8 +189,6 @@ def load_hid_data(DPATH,data_type,dt,X_ema,non_signal_inds,is_train,
                     if curr_file == []: continue
                     print("[DEBUG] loading: {}".format(HIDPATH_hd+curr_file[0]))
                     feat_ind_hidden = np.load(HIDPATH_hd+curr_file[0],mmap_mode="r")
-                    if not subset_fileinds is None and shrink_path is None:
-                        feat_ind_hidden = feat_ind_hidden[X_inds,:]
                     hidden_lst.append(feat_ind_hidden)            
         else:
             for feat_ind in range(0,len(allfeat_lst)):
@@ -190,15 +202,11 @@ def load_hid_data(DPATH,data_type,dt,X_ema,non_signal_inds,is_train,
                     if curr_file == []: continue
                     feat_ind_hidden = np.load(HIDPATH+curr_file[0],mmap_mode="r")
                     if DEBUG: print("[DEBUG] loading: {}".format(HIDPATH+curr_file[0]))
-                    if not subset_fileinds is None and shrink_path is None: 
-                        feat_ind_hidden = feat_ind_hidden[X_inds,:]
                     hidden_lst.append(feat_ind_hidden)
 
         # add the nonsignal stuff
         if "nonsignal" in data_type:
             X_ema_curr = X_ema[:,non_signal_inds]
-            if not subset_fileinds is None:
-                X_ema_curr = X_ema_curr[X_inds]
             hidden_lst.append(X_ema_curr)
         
         # For DEBUG purposes
@@ -216,8 +224,18 @@ def load_hid_data(DPATH,data_type,dt,X_ema,non_signal_inds,is_train,
                 assert(X.shape[1] == num_feat*200)
     return(X)
 
-def load_data(PATH,data_type,label_type,is_train,hosp_data,curr_feat,
-              subset_fileinds=None,shrink_path=None,feat_lst=None):
+def load_data(PATH,
+              data_type,
+              label_type,
+              is_train,
+              hosp_data,
+              curr_feat,
+              shrink_path=None,
+              feat_lst=None):
+    """
+    Load data for downstream prediction models
+    """
+    
     is_single_feat = not "top15" in data_type
     DPATH = PATH+"/data/{}/hospital_{}/".format(label_type,hosp_data)
     if is_train:
@@ -241,23 +259,20 @@ def load_data(PATH,data_type,label_type,is_train,hosp_data,curr_feat,
     
     X_ema = np.load(DPATH+"proc/X_{}_60_{}_ema.npy".format(dt,label_type), mmap_mode="r")
     Y     = np.load(DPATH+"raw/y_{}_60_{}.npy".format(dt,label_type), mmap_mode="r")
-    if not subset_fileinds is None: 
-        X_inds = get_subset_inds(DPATH, subset_fileinds)
-        Y = Y[X_inds]
     
     if DEBUG: print("[DEBUG] Y.shape: {}".format(Y.shape))
     if   "raw" in data_type:
         X = load_raw_data(DPATH,data_type,dt,X_ema,non_signal_inds,curr_feat,is_single_feat,
-                          subset_fileinds=subset_fileinds,feat_lst=feat_lst)
+                          feat_lst=feat_lst)
     elif "proc" in data_type:
         X = load_raw_data(DPATH,data_type,dt,X_ema,non_signal_inds,curr_feat,is_single_feat,
-                          subset_fileinds=subset_fileinds,rpath="proc",stack_feat=False,feat_lst=feat_lst)
+                          rpath="proc",stack_feat=False,feat_lst=feat_lst)
     elif "ema" in data_type:
         X = load_ema_data(DPATH,data_type,dt,X_ema,non_signal_inds,feat_lst_inds,curr_feat,
-                          curr_feat_inds_ema,is_single_feat,subset_fileinds=subset_fileinds)
+                          curr_feat_inds_ema,is_single_feat)
     elif "min5" in data_type or "auto" in data_type or "nextfive" in data_type or data_type.startswith("hypo") or "randemb" in data_type:
         X = load_hid_data(DPATH,data_type,dt,X_ema,non_signal_inds,is_train,curr_feat,
-                          hosp_data,is_single_feat,subset_fileinds=subset_fileinds,
+                          hosp_data,is_single_feat,
                           shrink_path=shrink_path,feat_lst=feat_lst)
     elif data_type == "rand_input[top15]+nonsignal":
         if DEBUG:
@@ -274,7 +289,25 @@ def load_data(PATH,data_type,label_type,is_train,hosp_data,curr_feat,
         Y = Y2
     return(X,Y)
 
-def train_xgb_model(RESDIR,trainvalX,trainvalY,data_type,label_type,hosp_data,eta):
+def train_xgb_model(RESDIR,
+                    trainvalX,
+                    trainvalY,
+                    data_type,
+                    label_type,
+                    hosp_data,
+                    eta):
+    """
+    Train downstream model
+    
+    Args
+     - RESDIR : Directory to save trained model
+     - trainvalX : train validation input data
+     - trainvalY : train validation label data
+     - data_type : the type of embedding associated with the data
+     - label_type : downstream prediction outcome
+     - hosp_data : the hospital we will load the data from
+     - eta : learning rate
+    """
     # Split Dataset into Training and Validation
     train_ratio = 0.9
     nine_tenths_ind = int(train_ratio*trainvalX.shape[0])
@@ -314,9 +347,29 @@ def train_xgb_model(RESDIR,trainvalX,trainvalY,data_type,label_type,hosp_data,et
     del dtrain, dvalid, bst
     gc.collect()
 
-def load_xgb_model_and_test(RESDIR,test1X,test1Y,data_type,label_type,
-                            hosp_data,xgb_type,eta,hosp_model=None,
+def load_xgb_model_and_test(RESDIR,
+                            test1X,
+                            test1Y,
+                            data_type,
+                            label_type,
+                            hosp_data,
+                            eta,
+                            hosp_model=None,
                             return_pred=False):
+    """
+    Load downstream model and evaluate on test data
+    
+    Args
+     - RESDIR : directory to save results
+     - test1X : testing input data
+     - test1Y : testing label data
+     - data_type : embedding type
+     - label_type : downstream prediction outcome
+     - hosp_data : hospital we draw the data from
+     - eta : learning rate
+     - hosp_model : hospital embeddings were trained in
+     - return_pred : whether or not to return predictions for additional analyses
+    """
     save_path = RESDIR+"hosp{}_data/{}/".format(hosp_data,data_type)
     bst = xgb.Booster()
     mod_path = save_path

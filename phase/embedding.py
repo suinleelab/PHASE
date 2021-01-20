@@ -183,10 +183,23 @@ def load_train_val_data(DATAPATH,
 
     return(train_x, train_y, val_x, val_y)
     
-def create_model(output_size=False, task="None", min_mod=None, lr=0.001, 
-                 epoch_num=200, fine_tune=False):
+def create_model(min_mod=None, 
+                 output_size=False, 
+                 task=None, 
+                 lr=0.001, 
+                 epoch_num=200, 
+                 fine_tune=False):
     """
-    Create an LSTM model with specific parameters
+    Create an LSTM model
+    
+    Args
+     - min_mod : if none, create a new model otherwise initialize 
+         model using min_mod's weights
+     - output_size : if initializing using min_mod, specify output_size
+     - task : if task is "hypo" then assume binary output
+     - lr : learning rate
+     - epoch_num : number of epochs to train for, used to determine model name
+     - fine_tune : add the final layer only if we are fine tuning the model
     """
     
     print("[PROGRESS] Starting create_model()")
@@ -227,12 +240,40 @@ def create_model(output_size=False, task="None", min_mod=None, lr=0.001,
 
     return(model,mod_name,epoch_num)
     
-def train_model(model, mod_name, train_x, train_y, val_x, val_y, MODDIR, 
-                epoch_num, early_stopping_rounds=5, per_iter_size=300000,
-                verbose = 0, batch_size = 1000):
+def train_model(model, 
+                mod_name, 
+                train_x, 
+                train_y, 
+                val_x, 
+                val_y, 
+                MODDIR, 
+                epoch_num, 
+                early_stopping_rounds=200, 
+                per_iter_size=300000,
+                verbose=0, 
+                batch_size=1000):
+    """
+    Function to train a specific model and save each epoch
+    
+    Args
+     - model : model to train (expects a keras sequential model)
+     - mod_name : name of model, used for saving model and training stats
+     - train_x : training input data
+     - train_y : training labels
+     - val_x : validation input data
+     - val_y : validation label data
+     - MODDIR : directory to save the model 
+     - epoch_num : number of epochs to train for
+     - early_stopping_rounds : stop early if validation is non-improving
+     - per_iter_size : size of data to train with per iteration
+     - verbose : how much to print of training process
+     - batch_size : size of batches
+    """
+    
     print("[PROGRESS] Starting train_model()")
     if DEBUG: print("[DEBUG] MODDIR :{}".format(MODDIR))
 
+    # Initialize a loss file to keep track of loss as we train
     with open(MODDIR+"loss.txt", "w") as f:
         f.write("%s\t%s\t%s\t%s\n" % ("i", "train_loss", "val_loss", "epoch_time"))
         
@@ -269,6 +310,9 @@ def train_model(model, mod_name, train_x, train_y, val_x, val_y, MODDIR,
         if (non_improving_count >= early_stopping_rounds): break
 
 def load_min_model_helper(MPATH):
+    """
+    Helper function for loading best model according to validation loss
+    """
     print("[PROGRESS] Starting load_min_model_helper()")
     print("[DEBUG] MPATH {}".format(MPATH))
     mfiles = os.listdir(MPATH)
@@ -281,6 +325,9 @@ def load_min_model_helper(MPATH):
     return(load_model(min_mod_name))
             
 def load_min_model(MPATH,feat):
+    """
+    Function to load best model according to validation loss
+    """
     print("[PROGRESS] Starting load_min_model()")    
     full_mod_names = os.listdir(MPATH)
     full_mod_name = [m for m in full_mod_names if "feat:"+feat+"_" in m][0]
@@ -288,6 +335,9 @@ def load_min_model(MPATH,feat):
     return(load_min_model_helper(MPATH+full_mod_name))
 
 def load_trval_test_data(DPATH,feat,dtype="reformat",subset_files=None):
+    """
+    Load train validation and test data in order to embed
+    """
     print("[PROGRESS] Starting load_trval_test_data()")    
     fnames = [f for f in os.listdir(DPATH) if "featname:{}".format(feat) in f]
 
@@ -302,14 +352,7 @@ def load_trval_test_data(DPATH,feat,dtype="reformat",subset_files=None):
         print("[PROGRESS] Subsetting")
         trval_file_inds = np.load(DPATH+"train_validation_fileinds.npy")
         assert trval_file_inds.shape[0] == X_trval.shape[0]
-        if DEBUG: 
-            print("[DEBUG] Original trval size: {}".format(X_trval.shape))
-            print("[DEBUG] Number of procedures in trval: {}".format(np.unique(trval_file_inds).shape))
         X_trval = X_trval[np.isin(trval_file_inds, subset_files)]
-        if DEBUG: 
-            print("[DEBUG] Subsetted trval size: {}".format(X_trval.shape))
-            print("[DEBUG] Number of subsetted procedures in trval {}".format(np.unique(trval_file_inds[np.isin(trval_file_inds, subset_files)]).shape))
-
     
     if dtype == "reformat":
         # Add another axis
@@ -320,6 +363,10 @@ def load_trval_test_data(DPATH,feat,dtype="reformat",subset_files=None):
     return(X_trval,X_test1)
 
 def embed_and_save(SPATH,suffix,model,X_trval,X_test1,feat,task):
+    """
+    Function to embed data and save the embedded versions of the data
+    """
+    
     print("[PROGRESS] Starting embed_and_save()")    
     if not os.path.exists(SPATH): os.makedirs(SPATH)
 
