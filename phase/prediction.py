@@ -1,6 +1,7 @@
-########################
-### Set up
-########################
+##############
+### Set up ###
+##############
+from sklearn.preprocessing import StandardScaler
 from os.path import expanduser as eu
 from matplotlib import pyplot as plt
 from numpy import *
@@ -35,6 +36,10 @@ allfeat_lst = ["SAO2", "FIO2", "ECGRATE", "ETCO2", "RESPRATE", "PEEP", "TV", "PE
 top15 = ['ECGRATE', 'ETCO2', 'ETSEV', 'ETSEVO', 'FIO2', 'NIBPD', 'NIBPM',
          'NIBPS', 'PEAK', 'PEEP', 'PIP', 'RESPRATE', 'SAO2', 'TEMP1', 'TV']
 
+#########################
+### Code to load data ###
+#########################
+
 def load_raw_data(DPATH,
                   data_type,
                   dt,
@@ -47,6 +52,21 @@ def load_raw_data(DPATH,
                   feat_lst=None):
     """
     Load raw data
+    
+    Args
+     - DPATH : data path
+     - data_type: embedding data type
+     - dt : train or test data
+     - X_ema : ema data (has static variables)
+     - non_signal_inds : ema indices that are not signal variables
+     - curr_feat : current feature corresponding to label_type
+     - is_single_feat : whether to load a single feature
+     - rpath : load raw or processed data (XGB vs MLP)
+     - stack_feat : whether to concatenate features
+     - feat_lst : list of features to load
+     
+    Returns
+     - X : independent variables
     """
     
     if DEBUG:
@@ -104,7 +124,21 @@ def load_ema_data(DPATH,
                   curr_feat_inds_ema,
                   is_single_feat):
     """
-    Code to load EMA data
+    Load exponential moving average and variance data
+    
+    Args
+     - DPATH : data path
+     - data_type: embedding data type
+     - dt : train or test data
+     - X_ema : ema data (has static variables)
+     - non_signal_inds : ema indices that are not signal variables
+     - feat_lst_inds : features indices to load
+     - curr_feat : current feature corresponding to label_type
+     - curr_feat_inds_ema : indices corresponding to current feature
+     - is_single_feat : whether to load a single feature
+     
+    Returns
+     - X : independent variables
     """
     if is_single_feat:
         X = X_ema[:,curr_feat_inds_ema]
@@ -123,6 +157,8 @@ def load_ema_data(DPATH,
     return(X)
 
 def list_files(DPATH,data_type,is_train):
+    """ Helper function to list files in a particular directory
+    """
     if "randemb" in data_type:
         hosp_model = 0
     else:
@@ -161,6 +197,21 @@ def load_hid_data(DPATH,
                   feat_lst=None):
     """
     Load embedded (hidden) data
+    
+    Args
+     - DPATH : data path
+     - data_type: embedding data type
+     - X_ema : ema data (has static variables)
+     - non_signal_inds : ema indices that are not signal variables
+     - is_train : whether to load train or test data
+     - curr_feat : current feature corresponding to label_type
+     - hosp_data : downstream hospital data set
+     - is_single_feat : whether to load a single feature
+     - shrink_path : path for shrinking data sets
+     - feat_lst : list of features to load
+     
+    Returns
+     - X : independent variables
     """
     if not shrink_path is None: DPATH = shrink_path
     if feat_lst is None: feat_lst = top15
@@ -234,6 +285,20 @@ def load_data(PATH,
               feat_lst=None):
     """
     Load data for downstream prediction models
+    
+    Args
+     - PATH : default path
+     - data_type : embedding type
+     - label_type : downstream prediction type
+     - is_train : loading train or test data
+     - hosp_data : downstream hospital
+     - curr_feat : current feature corresponding to label_type
+     - shrink_path : path for shrinking data sets
+     - feat_lst : list of features to use
+     
+    Returns
+     - X : independent variables
+     - y : dependent variables
     """
     
     is_single_feat = not "top15" in data_type
@@ -288,6 +353,10 @@ def load_data(PATH,
         Y2[Y2 != 0.0] = 1.0
         Y = Y2
     return(X,Y)
+
+################################
+### Code for downstream XGBs ###
+################################
 
 def train_xgb_model(RESDIR,
                     trainvalX,
@@ -417,3 +486,359 @@ def load_xgb_model_and_test(RESDIR,
     np.save("{}auc_roc_lst".format(save_path,data_type), auc_roc_lst)
     del test1X, dtest, bst
     gc.collect()
+    
+################################
+### Code for downstream MLPs ###
+################################
+    
+def load_min_model_helper(MPATH):
+    """ Helper function to load best validation performance model
+    """
+    
+    print("[PROGRESS] Starting load_min_model_helper()")
+    print("[DEBUG] MPATH {}".format(MPATH))
+    mfiles = os.listdir(MPATH)
+    full_mod_name = MPATH.split("/")[-1]
+    mfiles = [f for f in mfiles if "val_loss" in f]
+    loss_lst = [float(f.split("val_loss:")[1].split("_")[0]) for f in mfiles]
+    min_ind = loss_lst.index(min(loss_lst))
+    min_mod_name = "{}/{}".format(MPATH,mfiles[min_ind])
+    if DEBUG: print("[DEBUG] min_mod_name {}".format(mfiles[min_ind]))
+    return(load_model(min_mod_name))
+
+def train_mlp_model(RESDIR,
+                    trainvalX,
+                    trainvalY,
+                    data_type,
+                    label_type,
+                    hosp_data):
+    """
+    Train downstream MLP model
+    
+    Args
+     - RESDIR : Directory to save trained model
+     - trainvalX : train validation input data
+     - trainvalY : train validation label data
+     - data_type : the type of embedding associated with the data
+     - label_type : downstream prediction outcome
+     - hosp_data : the hospital we will load the data from
+    """
+    
+    train_ratio = 0.9
+    nine_tenths_ind = int(train_ratio*trainvalX.shape[0])
+    X_train = trainvalX[0:nine_tenths_ind,:]
+    y_train = trainvalY[0:nine_tenths_ind]
+    X_valid = trainvalX[nine_tenths_ind:trainvalX.shape[0],:]
+    y_valid = trainvalY[nine_tenths_ind:trainvalX.shape[0]]
+    del trainvalX
+    gc.collect()
+    # Randomize
+    indices = np.arange(0,X_train.shape[0])
+    random.shuffle(indices)
+    X_train = X_train[indices,:]
+    y_train = y_train[indices]
+
+    indices = np.arange(0,X_valid.shape[0])
+    random.shuffle(indices)
+    X_valid = X_valid[indices,:]
+    y_valid = y_valid[indices]
+
+    print("[PROGRESS] Starting create_model()")
+    # lookback = 60; h1 = 200; h2 = 200;
+    b_size = 1000; epoch_num = 200; lr = 0.00001
+    opt_name = "adam"
+    opt = keras.optimizers.Adam(lr)
+    loss_func = "binary_crossentropy"
+    mod_name = "multivariate_mlp_label{}_dtype{}_hd{}".format(label_type,data_type,hosp_data)
+    mod_name += "_{}ep_{}ba_{}opt_{}loss".format(epoch_num,b_size,opt_name,loss_func)
+
+    model = Sequential()
+    model.add(Dense(100, input_dim=X_train.shape[1], activation='relu'))
+    model.add(Dropout(0.5))
+    model.add(Dense(100, activation='relu'))
+    model.add(Dropout(0.5))
+    model.add(Dense(1, activation='sigmoid'))
+    model.compile(loss=loss_func, optimizer=opt)
+
+    MODDIR = PATH+"models/"+mod_name+"/"
+    if not os.path.exists(MODDIR): os.makedirs(MODDIR)
+
+    with open(MODDIR+"loss.txt", "w") as f:
+        f.write("%s\t%s\t%s\t%s\n" % ("i", "train_loss", "val_loss", "epoch_time"))
+
+    # Train and Save
+    diffs = []; best_loss_so_far = float("inf")
+    start_time = time.time(); per_iter_size = 300000
+    for i in range(0,epoch_num):
+        if per_iter_size < X_train.shape[0]:
+            per_iter_size = X_train.shape[0]
+        inds = np.random.choice(X_train.shape[0],per_iter_size,replace=False)
+        curr_x = X_train[inds,]; curr_y = y_train[inds,]
+        history = model.fit(curr_x, curr_y, epochs=1, batch_size=1000, 
+                            validation_data=(X_valid,y_valid))
+
+        # Save details about training
+        train_loss = history.history['loss'][0]
+        val_loss = history.history['val_loss'][0]
+        epoch_time = time.time() - start_time
+        with open(MODDIR+"loss.txt", "a") as f:
+            f.write("%d\t%f\t%f\t%f\n" % (i, train_loss, val_loss, epoch_time))
+
+        # Save model each iteration
+        model.save("{}val_loss:{}_epoch:{}_{}.h5".format(MODDIR,val_loss,i,mod_name))
+    return(MODDIR)
+
+def load_mlp_model_and_test(RESDIR,
+                            MODDIR,
+                            X_test,
+                            y_test,
+                            data_type,
+                            label_type,
+                            hosp_data):
+    """
+    Load downstream model and evaluate on test data
+    
+    Args
+     - RESDIR : directory to save results
+     - MODDIR : directory model lives in
+     - X_test : testing input data
+     - y_test : testing label data
+     - data_type : embedding type
+     - label_type : downstream prediction outcome
+     - hosp_data : hospital we draw the data from
+    """
+    model = load_min_model_helper(MODDIR)
+    save_path = RESDIR+"hosp{}_data/{}/".format(hosp_data,data_type)
+    if not os.path.exists(save_path): os.makedirs(save_path)
+    print("[DEBUG] Loading model from {}".format(save_path))
+    ypred = model.predict(X_test)
+    np.save(save_path+"ypred.npy",ypred)
+    np.save(save_path+"y_test.npy",y_test)
+    auc = metrics.average_precision_score(y_test, ypred)
+    np.random.seed(231)
+    auc_lst = []
+    roc_auc_lst = []
+    for i in range(0,100):
+        inds = np.random.choice(X_test.shape[0], X_test.shape[0], replace=True)
+        auc = metrics.average_precision_score(y_test[inds], ypred[inds])
+        auc_lst.append(auc)
+        roc_auc = metrics.roc_auc_score(y_test[inds], ypred[inds])
+        roc_auc_lst.append(roc_auc)
+    auc_lst = np.array(auc_lst)
+    roc_auc_lst = np.array(roc_auc_lst)
+    print("[DEBUG] auc_lst.mean(): {}".format(auc_lst.mean()))
+    print("[DEBUG] roc_auc_lst.mean(): {}".format(roc_auc_lst.mean()))
+
+    SP = RESDIR+"hosp{}_data/".format(hosp_data)
+    f = open('{}conf_int_hospdata{}_prauc.txt'.format(SP,hosp_data),'a')
+    f.write("{}, {}+-{}\n".format(data_type,auc_lst.mean().round(4),2*np.std(auc_lst).round(4)))
+    f.close()
+    f = open('{}conf_int_hospdata{}_rocauc.txt'.format(SP,hosp_data),'a')
+    f.write("{}, {}+-{}\n".format(data_type,roc_auc_lst.mean().round(4),2*np.std(roc_auc_lst).round(4)))
+    f.close()
+    np.save("{}auc_lst".format(save_path,data_type), auc_lst)
+    np.save("{}roc_auc_lst".format(save_path,data_type), roc_auc_lst)
+    
+#################################
+### Code for downstream LSTMs ###
+#################################
+    
+def standardize_static(X_lst):
+    """ Standardize static features
+    """
+    mean = X_lst[-1].mean(0)
+    std  = X_lst[-1].std(0)
+    std[std == 0] = 1
+    X_lst[-1] = (X_lst[-1] - mean)/std
+    return(X_lst)
+
+def split_data_lst(X_trval_lst,y_trval):
+    """ Split data in list form
+    """
+    train_ratio = 0.9
+    sample_size = X_trval_lst[0].shape[0]
+    nine_tenths_ind = int(train_ratio*sample_size)
+    X_train = [X[0:nine_tenths_ind,:] for X in X_trval_lst]
+    y_train = y_trval[0:nine_tenths_ind]
+    X_valid = [X[nine_tenths_ind:sample_size,:] for X in X_trval_lst]
+    y_valid = y_trval[nine_tenths_ind:sample_size]
+    del X_trval_lst
+    gc.collect()
+    return(X_train, y_train, X_valid, y_valid)
+
+def form_LSTM_model_train(X_trval_lst,
+                          y_trval,
+                          hyper_dict,
+                          label_type,
+                          epoch_num=50,
+                          is_tune=True):
+    """
+    Form LSTM model and train
+    
+    Args
+     - X_trval_lst : train validation data in list form
+     - y_trval : train validation output in list form
+     - hyper_dict : dictionary of hyperparameters
+     - label_type : downstream prediction outcome
+     - epoch_num : number of epochs
+     - is_tune : whether to fine tune
+    """
+    ########## Form Data #########
+    X_train_lst, y_train, X_valid_lst, y_valid = split_data_lst(X_trval_lst,y_trval)
+
+    X_train_lst = [X[:,:,np.newaxis] if X.shape[1] == 60 else X for X in X_train_lst]
+    X_train_lst = [np.concatenate(X_train_lst[:-1],2),X_train_lst[-1]]
+
+    X_valid_lst = [X[:,:,np.newaxis] if X.shape[1] == 60 else X for X in X_valid_lst]
+    X_valid_lst = [np.concatenate(X_valid_lst[:-1],2),X_valid_lst[-1]]
+
+    ########## Form Model #########
+    print("[PROGRESS] form_model()")
+
+    # Hyperparameters
+    numlayer = hyper_dict["numlayer"]
+    nodesize = hyper_dict["numnode"]
+    opt_name = hyper_dict["opt"]
+    drop     = hyper_dict["drop"]
+    lr       = hyper_dict["lr"]
+    
+    if opt_name == "RMSprop":
+        opt = RMSprop(lr);
+    elif opt_name == "Adam":
+        opt = Adam(lr);
+    elif opt_name == "SGD":
+        opt = SGD(lr);
+    
+    b_size = 1000
+    per_epoch_size = 300000
+
+    lookback = 60
+    loss_func = "binary_crossentropy"
+
+    # Model name
+    if is_tune:
+        mod_path  = "tune_multilstm_{}hospdata_{}label".format(hosp_data,label_type)
+        mod_name  = "".join(["{}{}_".format(hyper_dict[k],k) for k in hyper_dict])
+        mod_name += "{}bsize_{}epochnum_{}perepochsize".format(b_size,epoch_num,per_epoch_size)
+        MODDIR = "{}models/{}/{}/".format(PATH,mod_path,mod_name)
+    else:
+        mod_name  = "multilstm_{}hospdata_{}label_".format(hosp_data,label_type)
+        mod_name += "".join(["{}{}_".format(hyper_dict[k],k) for k in hyper_dict])
+        mod_name += "{}bsize_{}epochnum_{}perepochsize".format(b_size,epoch_num,per_epoch_size)
+        MODDIR = "{}models/{}/".format(PATH,mod_name)
+    
+    input_lst   = []; encoded_lst = []
+    # Signals
+    sig = Input(shape=(lookback,15))
+    if numlayer == 1:
+        lstm1 = LSTM(nodesize, recurrent_dropout=drop)
+        encoded = lstm1(sig)
+    elif numlayer == 2:
+        lstm1 = LSTM(nodesize, recurrent_dropout=drop, return_sequences=True)
+        lstm2 = LSTM(nodesize, recurrent_dropout=drop, dropout=drop)
+        encoded = lstm2(lstm1(sig))
+    elif numlayer == 3:
+        lstm1 = LSTM(nodesize, recurrent_dropout=drop, return_sequences=True)
+        lstm2 = LSTM(nodesize, recurrent_dropout=drop, dropout=drop, return_sequences=True)
+        lstm3 = LSTM(nodesize, recurrent_dropout=drop, dropout=drop)
+        encoded = lstm3(lstm2(lstm1(sig)))
+    else:
+        assert numlayer <= 3, "Too many layers"
+    input_lst.append(sig); encoded_lst.append(encoded)
+
+    # Static variables
+    static_size = X_trval_lst[-1].shape[1]
+    static = Input(shape=[static_size])
+    input_lst   += [static]; encoded_lst += [static]
+    
+    # Combine and compile model
+    merged_vector = keras.layers.concatenate(encoded_lst, axis=-1)
+    predictions = Dense(1, activation='sigmoid')(merged_vector)
+    model = Model(inputs=input_lst, outputs=predictions)
+    model.compile(optimizer=opt, loss=loss_func)
+    
+    ########## Training #########
+    print("[PROGRESS] Starting train_model()")
+
+    loss_keys = ["loss", 'val_loss']
+
+    print("[PROGRESS] Making MODDIR {}".format(MODDIR))
+    if not os.path.exists(MODDIR): os.makedirs(MODDIR)
+    with open(MODDIR+"loss.txt", "w") as f:
+        f.write("\t".join(["i", "epoch_time"] + loss_keys)+"\n")
+
+    # Train and Save
+    start_time = time.time()
+    for i in range(0,epoch_num):
+        train_subset_inds = np.random.choice(X_train_lst[0].shape[0],per_epoch_size,replace=False)
+#         pos_inds = np.where(y_train==1)[0]
+#         neg_inds = np.where(y_train!=1)[0]
+#         neg_subset_inds = np.random.choice(neg_inds,pos_inds.shape[0],replace=False)
+#         train_subset_inds = np.concatenate([pos_inds,neg_subset_inds])
+        np.random.shuffle(train_subset_inds)
+        X_train_lst_sub = [X[train_subset_inds] for X in X_train_lst]
+        y_train_sub     = y_train[train_subset_inds]
+        history = model.fit(X_train_lst_sub, y_train_sub, epochs=1, batch_size=b_size, 
+                            validation_data=(X_valid_lst,y_valid))
+
+        # Save details about training
+        epoch_time = time.time() - start_time
+        write_lst = [i, epoch_time]
+        write_lst += [history.history[k][0] for k in loss_keys]
+        with open(MODDIR+"loss.txt", "a") as f:
+            f.write("\t".join([str(round(e,5)) for e in write_lst])+"\n")
+
+        # Save model each iteration
+        val_loss = history.history['val_loss'][0]
+        model.save("{}val_loss:{}_epoch:{}.h5".format(MODDIR,val_loss,i))
+
+    return(MODDIR)
+
+def load_LSTM_model_and_test(RESDIR,
+                             MODDIR,
+                             X_test,
+                             y_test,
+                             data_type,
+                             hosp_data):
+    """
+    Load the LSTM model and evaluate on the test set
+    
+    Args
+     - RESDIR : result directory
+     - MODDIR : model directory
+     - X_test : independent variables in test set
+     - y_test : dependent variables in test set
+     - data_type : embedding type
+     - hosp_data : downstream hospital data set
+    """
+    model = load_min_model_helper(MODDIR)
+    save_path = RESDIR+"hosp{}_data/{}/".format(hosp_data,data_type)
+    if not os.path.exists(save_path): os.makedirs(save_path)
+    print("[DEBUG] Loading model from {}".format(save_path))
+    ypred = model.predict(X_test)
+    np.save(save_path+"ypred.npy",ypred)
+    np.save(save_path+"y_test.npy",y_test)
+    auc = metrics.average_precision_score(y_test, ypred)
+    np.random.seed(231)
+    auc_lst = []
+    roc_auc_lst = []
+    for i in range(0,100):
+        inds = np.random.choice(X_test[-1].shape[0], X_test[-1].shape[0], replace=True)
+        auc = metrics.average_precision_score(y_test[inds], ypred[inds])
+        auc_lst.append(auc)
+        roc_auc = metrics.roc_auc_score(y_test[inds], ypred[inds])
+        roc_auc_lst.append(roc_auc)
+    auc_lst = np.array(auc_lst)
+    roc_auc_lst = np.array(roc_auc_lst)
+    print("[DEBUG] auc_lst.mean(): {}".format(auc_lst.mean()))
+    print("[DEBUG] roc_auc_lst.mean(): {}".format(roc_auc_lst.mean()))
+
+    SP = RESDIR+"hosp{}_data/".format(hosp_data)
+    f = open('{}conf_int_hospdata{}_prauc.txt'.format(SP,hosp_data),'a')
+    f.write("{}, {}+-{}\n".format(data_type,auc_lst.mean().round(4),2*np.std(auc_lst).round(4)))
+    f.close()
+    f = open('{}conf_int_hospdata{}_rocauc.txt'.format(SP,hosp_data),'a')
+    f.write("{}, {}+-{}\n".format(data_type,roc_auc_lst.mean().round(4),2*np.std(roc_auc_lst).round(4)))
+    f.close()
+    np.save("{}auc_lst".format(save_path,data_type), auc_lst)
+    np.save("{}roc_auc_lst".format(save_path,data_type), roc_auc_lst)
