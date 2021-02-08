@@ -33,4 +33,4 @@ For downstream prediction, we evaluate a number of embedding types utilizing gra
 
 ## Prerequisites
 
-* Python, NumPy, Tensorflow, Keras
+* Python, NumPy, Tensorflow, Keras, XGBoost.
