@@ -31,3 +31,6 @@ We train upstream LSTM embedding models in `experiments/upstream` using Keras wi
 
 For downstream prediction, we evaluate a number of embedding types utilizing gradient boosted trees (XGBoost), and multi-layer perceptrons (Keras with Tensorflow backend).  In addition, we train an LSTM on raw signal data (only processed to the extent of normalization).  Finally, we include an experiment with heterogenous sets of features, where we assume the downstream target hospital only has a subset of the features available in the upstream source hospital.
 
+## Prerequisites
+
+* Python, NumPy, Tensorflow, Keras
